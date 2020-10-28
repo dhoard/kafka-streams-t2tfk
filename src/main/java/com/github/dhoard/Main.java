@@ -4,6 +4,7 @@ import java.util.Properties;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
+import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,7 +51,14 @@ public class Main {
         try {
             streams = new Streams(streamProperties, additionalProperties);
             streams.start();
-            streams.await();
+
+            while (true) {
+                Thread.sleep(10000);
+                JSONObject jsonObject = (JSONObject) streams.get("100");
+                LOGGER.info("100 = [{}]", jsonObject);
+            }
+
+            //streams.await();
         } finally {
             streams.destroy();
         }

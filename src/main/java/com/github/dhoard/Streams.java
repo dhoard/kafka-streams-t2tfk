@@ -6,12 +6,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Function;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.StoreQueryParameters;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Materialized;
 import org.apache.kafka.streams.kstream.Produced;
 import org.apache.kafka.streams.kstream.ValueJoiner;
+import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.state.QueryableStoreTypes;
+import org.apache.kafka.streams.state.ReadOnlyKeyValueStore;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +59,8 @@ public class Streams {
 
     private KTable<String, JSONObject> accountCustomerDataKTable;
 
+    private ReadOnlyKeyValueStore<String, String> readOnlyKeyValueStore;
+
     public Streams(Properties streamProperties, Properties additionalProperties) {
         this.streamProperties = streamProperties;
         this.additionalProperties = additionalProperties;
@@ -86,11 +94,16 @@ public class Streams {
             this.inputAccountKTable.join(
                 this.inputCustomerDataKTable,
                 new ExtractFunction(),
-                new CustomValueJoiner());
+                new CustomValueJoiner(),
+                Materialized.<String, JSONObject, KeyValueStore<Bytes, byte[]>>as("queryable-store")
+                    .withKeySerde(Serdes.String())
+                    .withValueSerde(this.jsonObjectSerde));
 
+        /*
         this.accountCustomerDataKTable.toStream().to(
             this.additionalProperties.getProperty("outputTopic"),
             Produced.with(Serdes.String(), this.jsonObjectSerde));
+        */
 
         this.kafkaStreams = new KafkaStreams(this.streamsBuilder.build(), this.streamProperties);
         this.kafkaStreams.setUncaughtExceptionHandler((t, e) -> {
@@ -98,6 +111,23 @@ public class Streams {
         });
 
         this.kafkaStreams.start();
+
+        while (true) {
+            KafkaStreams.State state = this.kafkaStreams.state();
+
+            if ("RUNNING".equals(state.toString())) {
+                break;
+            }
+        }
+
+        this.readOnlyKeyValueStore =
+            this.kafkaStreams.store(
+                StoreQueryParameters.fromNameAndType(
+                    "queryable-store", QueryableStoreTypes.keyValueStore()));
+    }
+
+    public Object get(String key) {
+        return this.readOnlyKeyValueStore.get(key);
     }
 
     public void await() {
